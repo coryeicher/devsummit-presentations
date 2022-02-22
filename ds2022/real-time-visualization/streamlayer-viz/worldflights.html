@@ -1,0 +1,386 @@
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <title>Global Flights</title>
+
+    <script src="https://js.arcgis.com/calcite-components/1.0.0-beta.76/calcite.esm.js" type="module"></script>
+    <link rel="stylesheet" href="https://js.arcgis.com/calcite-components/1.0.0-beta.76/calcite.css" />
+    <link rel="stylesheet" href="https://js.arcgis.com/4.22/@arcgis/core/assets/esri/themes/dark/main.css" />
+
+</head>
+
+<style>
+    html,
+    body,
+    #viewDiv {
+        padding: 0;
+        margin: 0;
+        height: 100%;
+        width: 100%;
+    }
+
+    body {
+        display: flex;
+    }
+
+    calcite-loader {
+        align-self: center;
+        justify-self: center;
+    }
+
+    #header-title {
+        margin-left: 1rem;
+        margin-right: 1rem;
+    }
+
+    #info-content {
+        padding: 0.75rem;
+    }
+
+    calcite-rating {
+        margin-top: 0.25rem;
+    }
+
+    calcite-panel {
+        padding: 10px;
+    }
+</style>
+
+<body class="calcite-theme-dark">
+
+    <calcite-loader active></calcite-loader>
+
+    <calcite-shell content-behind hidden>
+
+        <h2 id="header-title" slot="header">
+            Global Flights
+        </h2>
+
+        <calcite-shell-panel slot="primary-panel" detached position="end">
+
+            <calcite-action-bar slot="action-bar">
+                <calcite-action data-action-id="flights" icon="plane" text="Flights"></calcite-action>
+                <calcite-action data-action-id="spatialFilter" icon="rectangle" text="Spatial filter"></calcite-action>
+                <calcite-action data-action-id="altitude" icon="altitude" text="Altitude filter"></calcite-action>
+                <calcite-action data-action-id="legend" icon="legend" text="Legend"></calcite-action>
+            </calcite-action-bar>
+
+            <!-- map-specific panels (each one provides a div for JS API widgets) -->
+            <calcite-panel heading="Stream layer" height-scale="l" width-scale="m" data-panel-id="flights" hidden>
+                <!-- <div id="layers-container"></div> -->
+                <div>
+                    <calcite-label>service url: <calcite-input id="streamUrlText"
+                            value="https://geoeventsample3.esri.com:6443/arcgis/rest/services/FlightAwarePosition/StreamServer">
+                            <calcite-button slot="action" id="toggleStreamLayerButton">Connect</calcite-button>
+                        </calcite-input>
+                        <calcite-input-message>Stream service</calcite-input-message>
+                    </calcite-label>
+                    <div style="width: 100%; padding: 1rem; flex: 1 1 auto; box-sizing: border-box;">
+                        <calcite-label id="websocketRate">Not connected.</calcite-label>
+                        <calcite-label id="clientRate"></calcite-label>
+                    </div>                    
+                </div>
+            </calcite-panel>
+            <calcite-panel heading="Spatial filter" height-scale="l" width-scale="m" data-panel-id="spatialFilter"
+                hidden>
+                <calcite-label style="padding: 1rem;">
+                    <div style="width: 100%; padding: 1rem; flex: 1 1 auto; box-sizing: border-box;">
+                        <calcite-button id="drawSpatialFilter" icon-start="rectangle-plus" disabled>Create filter
+                        </calcite-button>
+                        <calcite-button id="clearSpatialFilter" appearance="outline" icon-start="trash" disabled>Clear
+                        </calcite-button>
+                    </div>
+                </calcite-label>
+            </calcite-panel>
+            <calcite-panel heading="Attribute filter" height-scale="m" width-scale="m" data-panel-id="altitude" hidden>
+                <div>
+                    <calcite-label for="attribute-filter-select">Filter planes by altitude:</calcite-label>
+                    <calcite-select id="attribute-filter-select">
+                        <calcite-option value="-1" selected>none</calcite-option>
+                        <calcite-option value="10000">10,000ft or higher</calcite-option>
+                        <calcite-option value="6000">6,000ft or higher</calcite-option>
+                        <calcite-option value="3000">3,000ft or higher</calcite-option>
+                        <calcite-option value="2999">Lower than 3,000 feet</calcite-option>
+                    </calcite-select><br />
+                    <calcite-button id="clearFilterButton" style="height: 30px;" disabled>
+                        Clear
+                    </calcite-button>
+                </div>
+            </calcite-panel>
+            <calcite-panel heading="Legend" height-scale="l" width-scale="m" data-panel-id="legend" hidden>
+                <div id="legend-container"></div>
+            </calcite-panel>
+
+        </calcite-shell-panel>
+
+        <div id="viewDiv"></div>
+
+    </calcite-shell>
+
+</body>
+<script type="module">
+
+    import Map from "https://js.arcgis.com/4.22/@arcgis/core/Map.js";
+    import MapView from "https://js.arcgis.com/4.22/@arcgis/core/views/MapView.js";
+    import Legend from "https://js.arcgis.com/4.22/@arcgis/core/widgets/Legend.js";
+    import Expand from "https://js.arcgis.com/4.22/@arcgis/core/widgets/Expand.js";
+    import Graphic from "https://js.arcgis.com/4.22/@arcgis/core/Graphic.js";
+    import StreamLayer from "https://js.arcgis.com/4.22/@arcgis/core/layers/StreamLayer.js";
+    import GraphicsLayer from "https://js.arcgis.com/4.22/@arcgis/core/layers/GraphicsLayer.js";
+    import Polygon from "https://js.arcgis.com/4.22/@arcgis/core/geometry/Polygon.js";
+    import SketchViewModel from "https://js.arcgis.com/4.22/@arcgis/core/widgets/Sketch/SketchViewModel.js";
+
+    var streamLayer, streamLayerView;
+    const template = {
+        title: "ID: {ident}",
+        content: [
+            {
+                type: "fields",
+                fieldInfos: [
+                    {
+                        fieldName: "alt",
+                        label: "Altitude (feet)"
+                    },
+                    {
+                        fieldName: "heading",
+                        label: "Heading"
+                    },
+                    {
+                        fieldName: "gs",
+                        label: "Ground speed"
+                    }
+                ]
+            }
+        ]
+    };
+    const map = new Map({
+        basemap: "dark-gray-vector"
+    });
+    const view = new MapView({
+        container: "viewDiv",
+        map: map,
+        center: [-117.98118, 34.00679],
+        zoom: 9
+    });
+
+    const legend = new Legend({
+        view,
+        container: "legend-container"
+    });
+
+    /*var expand = new Expand({
+      view: view,
+      content: legend
+    });
+  
+    view.ui.add(expand, "top-left");*/
+
+    //view.ui.add("toggle-snippet", "top-right");
+    const altitudeFilterSelect = document.getElementById("attribute-filter-select");
+
+    altitudeFilterSelect.addEventListener("calciteSelectChange", filterChanged);
+
+    function filterChanged() {
+        let filterValue;
+        switch (altitudeFilterSelect.value) {
+            case "-1":
+                filterValue = null;
+                break;
+            case "10000":
+                filterValue = "alt >= 10000";
+                break;
+            case "6000":
+                filterValue = "alt >= 6000";
+                break;
+            case "3000":
+                filterValue = "alt >= 3000";
+                break;
+            case "2999":
+                filterValue = "alt < 3000";
+                break;
+        }
+        streamLayerView.filter = {
+            where: filterValue
+        };
+    };
+
+    // Connect click events to UI buttons
+    const toggleLayerButton = document.getElementById("toggleStreamLayerButton");
+    const clearFilterButton = document.getElementById("clearFilterButton");
+
+    clearFilterButton.addEventListener("click", function () {
+        streamLayerView.filter = null;
+    });
+
+    /*************************************************
+     * Functions to add and remove Stream Layer
+     *************************************************/
+    toggleLayerButton.addEventListener("click", function () {
+        if (streamLayer) {
+            map.remove(streamLayer);
+            streamLayer.destroy();
+            streamLayer = null;
+            view.graphics.removeAll();
+            processDisconnect();
+        } else {
+            addStreamLayer();
+        }
+    });
+
+    function addStreamLayer() {
+        // URL to stream service
+        var svcUrl = document.getElementById("streamUrlText").value;
+
+        // Construct Stream Layer
+        streamLayer = new StreamLayer({
+            url: svcUrl,
+            popupTemplate: template,
+            purgeOptions: {
+                displayCount: 10000
+            },
+            renderer: {
+                type: "simple",
+                symbol: {
+                    type: "picture-marker",  // autocasts as new PictureMarkerSymbol()
+                    url: "./plane-16.svg"
+                },
+                visualVariables: [{
+                    type: "rotation",
+                    field: "heading",
+                    rotationType: "geographic"
+                },
+                {
+                    type: "size",
+                    field: "alt",
+                    stops: [{
+                        value: 6100,
+                        size: 10
+                    },
+                    {
+                        value: 10000,
+                        size: 25
+                    }
+                    ]
+                }
+                ]
+            }
+        });
+        map.add(streamLayer);
+        // When graphics controller created, register listeners for events
+        view.whenLayerView(streamLayer).then(function (layerView) {
+            streamLayerView = layerView;
+            processConnect();
+            layerView.watch("connectionStatus", function (value) {
+                if (value === "connected") {
+                    processConnect();
+                } else {
+                    processDisconnect();
+                }
+            });
+            streamLayerView.on("update-rate", showUpdateRate);
+        });
+    };
+    /*********************************************************
+     * Stream layer event handlers
+     *********************************************************/
+    let serverUpdateRate, clientUpdateRate;
+
+    function showUpdateRate(event) {
+        serverUpdateRate = event.websocket;
+        clientUpdateRate = event.client;
+        document.getElementById("websocketRate").innerHTML = "Server rate: " + serverUpdateRate + "ms";
+        document.getElementById("clientRate").innerHTML = "Client processing rate: " + clientUpdateRate + "ms";
+    };
+
+    function processConnect() {
+        toggleLayerButton.value = "Remove stream layer";
+        drawSpatialFilter.removeAttribute("disabled");
+        clearFilterButton.removeAttribute("disabled");
+        clearSpatialFilter.removeAttribute("disabled");
+    };
+
+    function processDisconnect() {
+        toggleLayerButton.value = "Add stream layer";
+        drawSpatialFilter.setAttribute("disabled");
+        clearSpatialFilter.setAttribute("disabled");
+        clearFilterButton.setAttribute("disabled");
+        document.getElementById("websocketRate").innerHTML = "Not connected.";
+        document.getElementById("clientRate").innerHTML = "";
+    };
+
+    const polygonGraphicsLayer = new GraphicsLayer();
+    map.add(polygonGraphicsLayer);
+
+    // create a new sketch view model set its layer
+    const sketchViewModel = new SketchViewModel({
+        view: view,
+        layer: polygonGraphicsLayer,
+        polygonSymbol: {
+            type: "simple-fill",
+            style: "none",
+            outline: {
+                width: 1,
+                style: "solid",
+                color: "#4FA6D8"
+            }
+        }
+    });
+
+    const drawButton = document.getElementById("drawSpatialFilter");
+
+    // click event for the select by rectangle button
+    drawButton.addEventListener("click", () => {
+        view.popup.close();
+        polygonGraphicsLayer.removeAll();
+        sketchViewModel.create("rectangle");
+    });
+
+    document.getElementById("clearSpatialFilter").addEventListener("click", () => {
+        streamLayerView.effect = null;
+        polygonGraphicsLayer.removeAll();
+    });
+
+    // Once user is done drawing a rectangle on the map
+    // use the rectangle to select features on the map and table
+    sketchViewModel.on("create", async (event) => {
+        if (event.state === "complete") {
+            streamLayerView.effect = {
+                filter: {
+                    geometry: event.graphic.geometry
+                },
+                includedEffect: "bloom(1)",
+                excludedEffect: "grayscale(80%) opacity(50%)"
+            };
+        }
+    });
+
+    let activeWidget;
+
+    const handleActionBarClick = ({ target }) => {
+        if (target.tagName !== "CALCITE-ACTION") {
+            return;
+        }
+        if (activeWidget) {
+            document.querySelector(`[data-action-id=${activeWidget}]`).active = false;
+            document.querySelector(`[data-panel-id=${activeWidget}]`).hidden = true;
+        }
+        const nextWidget = target.dataset.actionId;
+        if (nextWidget !== activeWidget) {
+            document.querySelector(`[data-action-id=${nextWidget}]`).active = true;
+            document.querySelector(`[data-panel-id=${nextWidget}]`).hidden = false;
+            activeWidget = nextWidget;
+        } else {
+            activeWidget = null;
+        }
+    };
+
+    document.querySelector("calcite-action-bar").addEventListener("click", handleActionBarClick);
+
+    document.querySelector("calcite-shell").hidden = false;
+    document.querySelector("calcite-loader").active = false;
+
+</script>
+
+</html>
