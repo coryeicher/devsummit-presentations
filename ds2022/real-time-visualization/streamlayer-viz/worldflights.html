@@ -93,7 +93,7 @@
                     <calcite-label>
                         Service URL:
                         <calcite-input read-only id="streamUrlText"
-                            value="https://geoeventsample3.esri.com:6443/arcgis/rest/services/FlightAwarePosition/StreamServer">
+                            value="https://geoeventsample1.esri.com:6443/arcgis/rest/services/FAAStream/StreamServer">
                         </calcite-input>
                         <calcite-input-message>Stream service</calcite-input-message>
                     </calcite-label>
@@ -166,15 +166,15 @@
                 type: "fields",
                 fieldInfos: [
                     {
-                        fieldName: "alt",
+                        fieldName: "AltitudeFeet",
                         label: "Altitude (feet)"
                     },
                     {
-                        fieldName: "heading",
+                        fieldName: "Heading",
                         label: "Heading"
                     },
                     {
-                        fieldName: "gs",
+                        fieldName: "GroundSpeedKnots",
                         label: "Ground speed"
                     }
                 ]
@@ -282,12 +282,12 @@
                 },
                 visualVariables: [{
                     type: "rotation",
-                    field: "heading",
+                    field: "Heading",
                     rotationType: "geographic"
                 },
                 {
                     type: "size",
-                    field: "alt",
+                    field: "AltitudeFeet",
                     stops: [{
                         value: 6100,
                         size: 10
